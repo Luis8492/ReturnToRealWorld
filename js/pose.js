@@ -224,6 +224,11 @@ for (let i = 0; i < CAPSULES.length; i++) {
   }
 }
 
+// Pairs within the upper body (from the lower back up). Balancing only moves
+// the legs and the lower back joint, so these can be checked before balancing.
+const inUpperBody = (bone) => bone >= 0 && (bone === BI.spine1 || inUpperBody(BONES[bone].parent));
+const UPPER_BODY_PAIRS = COLLISION_PAIRS.filter(([i, k]) => inUpperBody(CAPSULES[i].bone) && inUpperBody(CAPSULES[k].bone));
+
 /* ---------- joints ---------- */
 
 export function jointRotation(bone, q) {
@@ -268,19 +273,24 @@ function withinLimits(bone, q) {
 }
 
 // Random joint values inside the range of motion, shrunk by `s` (0..1).
-function sampleJoint(bone, q, rng, s = 1) {
+// A `bias` below 1 pushes the values out toward the ends of the range.
+function sampleJoint(bone, q, rng, s = 1, bias = 1) {
   const j = bone.joint, o = bone.param;
+  const reach = () => s * rng() ** bias;
+  // Measured from 0, or from the end nearest to 0 for one-sided ranges.
+  const pick = ([lo, hi]) => {
+    if (lo >= 0) return lo + (hi - lo) * reach();
+    if (hi <= 0) return hi + (lo - hi) * reach();
+    return rng() < -lo / (hi - lo) ? lo * reach() : hi * reach();
+  };
   if (j.type === 'ball') {
-    const phi = rng() * 2 * Math.PI, r = s * Math.sqrt(rng());
+    const phi = rng() * 2 * Math.PI, r = s * rng() ** (bias / 2);
     const c = r * Math.cos(phi), d = r * Math.sin(phi);
     q[o] = c * range(j.x, c);
     q[o + 1] = d * range(j.z, d);
-    q[o + 2] = lerp(j.y[0], j.y[1], rng()) * s;
+    q[o + 2] = pick(j.y);
   } else {
-    for (let i = 0; i < j.n; i++) {
-      const [lo, hi] = j.limits[i];
-      q[o + i] = lo >= 0 || hi <= 0 ? lerp(lo, hi, rng() * s + (lo >= 0 ? 0 : 1 - s)) : lerp(lo, hi, rng()) * s;
-    }
+    for (let i = 0; i < j.n; i++) q[o + i] = pick(j.limits[i]);
   }
 }
 
@@ -306,17 +316,12 @@ function forwardKinematics(q, rootR = I3, rootP = [0, 0, 0]) {
 }
 
 // Pelvis transform that puts the given foot flat on the ground at the origin.
-function rootOnFoot(q, side) {
+function worldOnFoot(q, side) {
   const fk = forwardKinematics(q);
   const a = BI['ankle' + side];
   const rootR = transpose(fk.R[a]);
   const rootP = sub([0, ANKLE_HEIGHT, 0], apply(rootR, fk.P[a]));
-  return { rootR, rootP };
-}
-
-function worldOnFoot(q, side) {
-  const { rootR, rootP } = rootOnFoot(q, side);
-  return { rootR, rootP, ...forwardKinematics(q, rootR, rootP) };
+  return { rootR, rootP, R: fk.R.map((m) => mul(rootR, m)), P: fk.P.map((p) => add(apply(rootR, p), rootP)) };
 }
 
 const toWorld = (w, bone, p) => add(w.P[bone], apply(w.R[bone], p));
@@ -381,9 +386,9 @@ function segmentDistance(p1, q1, p2, q2) {
   return Math.hypot(...sub(c1, c2));
 }
 
-function selfCollision(w) {
+function selfCollision(w, pairs = COLLISION_PAIRS) {
   const seg = CAPSULES.map((c) => capsuleWorld(w, c));
-  for (const [i, k] of COLLISION_PAIRS) {
+  for (const [i, k] of pairs) {
     const d = segmentDistance(seg[i][0], seg[i][1], seg[k][0], seg[k][1]);
     if (d < 0.9 * (CAPSULES[i].r + CAPSULES[k].r)) return `${BONES[CAPSULES[i].bone].name}/${BONES[CAPSULES[k].bone].name}`;
   }
@@ -420,14 +425,20 @@ function insideDistance(poly, x, z) {
 /* ---------- inverse kinematics ---------- */
 
 // Damped least squares on the `active` parameters, keeping joints in range.
+// A parameter that runs into its limit sits out the next few iterations so
+// the others can take over instead of the solver stalling against the limit.
 function solve(q, active, weights, residual, tol, iterations = 60) {
   const n = active.length, eps = 1e-5, lambda2 = 0.02 ** 2;
+  const resting = new Uint8Array(n);
   let e = residual(q);
   for (let it = 0; it < iterations; it++) {
-    if (Math.hypot(...e) < tol) return true;
+    const err = Math.hypot(...e);
+    if (err < tol) return true;
+    if (tol > 0 && it >= 30 && err > 0.02) return false; // not going to make it
     const m = e.length;
     const J = new Float64Array(m * n);
     for (let j = 0; j < n; j++) {
+      if (resting[j]) continue;
       const k = active[j], old = q[k];
       q[k] = old + eps;
       const e2 = residual(q);
@@ -453,8 +464,13 @@ function solve(q, active, weights, residual, tol, iterations = 60) {
       big = Math.max(big, Math.abs(step[j]));
     }
     const k = big > 0.15 ? 0.15 / big : 1;
-    for (let j = 0; j < n; j++) q[active[j]] += step[j] * k;
+    const wanted = active.map((a, j) => q[a] + step[j] * k);
+    wanted.forEach((v, j) => (q[active[j]] = v));
     for (const b of BONES) clampJoint(b, q);
+    for (let j = 0; j < n; j++) {
+      if (resting[j]) resting[j]--;
+      else if (Math.abs(q[active[j]] - wanted[j]) > 1e-6) resting[j] = 4;
+    }
     e = residual(q);
   }
   return Math.hypot(...e) < tol;
@@ -512,31 +528,31 @@ export function checkPose(pose) {
 
 /* ---------- generation ---------- */
 
-function attempt(rng) {
+// One try at a pose standing on the left foot, the right foot or both feet.
+function attempt(rng, support) {
   const q = new Float64Array(PARAM_COUNT);
-  const r = rng();
-  const both = r < 0.4;
-  const S = (both ? rng() < 0.5 : r < 0.7) ? 'L' : 'R'; // the foot the body is rooted on
+  const both = support === 'both';
+  const S = both ? (rng() < 0.5 ? 'L' : 'R') : support; // the foot the body is rooted on
   const F = S === 'L' ? 'R' : 'L';
-  const set = (name, s) => sampleJoint(BONES[BI[name]], q, rng, s);
-  const knee = (side, lo, hi) => { q[BONES[BI['knee' + side]].param] = lerp(lo, hi, rng()) * DEG; };
+  const set = (name, s, bias) => sampleJoint(BONES[BI[name]], q, rng, s, bias);
+  const knee = (side, lo, hi, bias = 1) => { q[BONES[BI['knee' + side]].param] = lerp(lo, hi, rng() ** bias) * DEG; };
 
-  set('spine1', 0.85);
-  set('spine2', 0.9);
-  set('neck', 0.9);
+  set('spine1', 1, 0.7);
+  set('spine2', 1, 0.7);
+  set('neck', 1, 0.6);
   for (const s of ['L', 'R']) {
-    set('shoulder' + s, 1);
-    set('elbow' + s, 1);
-    set('wrist' + s, 0.9);
+    set('shoulder' + s, 1, 0.6);
+    set('elbow' + s, 1, 0.8);
+    set('wrist' + s, 1, 0.6);
   }
 
   let active, weights, goals, residual;
   if (!both) {
-    set('hip' + S, 0.5);
-    knee(S, 0, 45);
-    set('hip' + F, 1);
-    knee(F, 0, 130);
-    set('ankle' + F, 1);
+    set('hip' + S, 0.75, 0.8);
+    knee(S, 0, 55);
+    set('hip' + F, 1, 0.5);
+    knee(F, 0, 140, 0.7);
+    set('ankle' + F, 1, 0.6);
     // Keep the center of mass over the middle part of the standing foot.
     const tx = lerp(-0.015, 0.015, rng()), tz = lerp(0.0, 0.09, rng());
     active = paramsOf('ankle' + S, 'knee' + S, 'hip' + S, 'spine1');
@@ -547,14 +563,14 @@ function attempt(rng) {
     };
   } else {
     for (const s of ['L', 'R']) {
-      set('hip' + s, 0.6);
-      knee(s, 10, 70);
+      set('hip' + s, 0.8, 0.7);
+      knee(s, 10, 90);
     }
     // Second foot flat on the ground, center of mass between the feet.
     const t = lerp(0.3, 0.7, rng());
     // Loose goals for a wide, lunging or squatting stance.
-    const fx = (S === 'L' ? -1 : 1) * lerp(0.2, 0.75, rng()), fz = lerp(-0.45, 0.45, rng());
-    const hipsY = lerp(0.66, 0.95, rng());
+    const fx = (S === 'L' ? -1 : 1) * lerp(0.25, 0.85, rng()), fz = lerp(-0.55, 0.55, rng());
+    const hipsY = lerp(0.55, 0.92, rng());
     const aF = BI['ankle' + F];
     active = paramsOf('ankle' + S, 'knee' + S, 'hip' + S, 'ankle' + F, 'knee' + F, 'hip' + F, 'spine1');
     weights = [1, 1, 0.6, 0.6, 0.6, 0.3, 1, 1, 0.6, 0.6, 0.6, 0.3, 0.3, 0.3, 0.1];
@@ -572,21 +588,23 @@ function attempt(rng) {
     };
   }
 
+  if (selfCollision(forwardKinematics(q), UPPER_BODY_PAIRS)) return null;
   if (goals) solve(q, active, weights, goals, 0, 30);
   if (!solve(q, active, weights, residual, 1.5e-3)) return null;
 
-  const { rootR, rootP } = rootOnFoot(q, S);
-  const pose = { q: Array.from(q), rootR, rootP, support: both ? 'both' : S };
+  const { rootR, rootP } = worldOnFoot(q, S);
+  const pose = { q: Array.from(q), rootR, rootP, support };
   if (both) {
     const w = forwardKinematics(q, rootR, rootP);
     const gap = Math.hypot(...sub(w.P[BI.ankleL], w.P[BI.ankleR]));
-    if (gap < 0.2 || gap > 0.9) return null;
+    if (gap < 0.2 || gap > 1.0) return null;
   }
   if (checkPose(pose).length) return null;
   return facingFront(pose);
 }
 
-// How far the pose is from standing still: joint use, lowered hips, a raised foot.
+// How far the pose is from standing still: joints near their limits, a
+// leaning trunk, a tilted head, a raised foot, limbs flung out, low hips.
 function weirdness(pose) {
   const { q } = pose;
   let sum = 0, n = 0;
@@ -601,7 +619,17 @@ function weirdness(pose) {
       n += j.n;
     }
   }
-  return sum / n + Math.max(0, 0.95 - pose.rootP[1]) + (pose.support === 'both' ? 0 : 0.08);
+  const w = forwardKinematics(q, pose.rootR, pose.rootP);
+  const tilt = (bone) => Math.acos(clamp(w.R[bone][4], -1, 1));
+  const footUp = Math.max(w.P[BI.ankleL][1], w.P[BI.ankleR][1]) - ANKLE_HEIGHT;
+  return (
+    sum / n +
+    0.35 * Math.min(1, tilt(BI.spine2) / (60 * DEG)) +
+    0.3 * Math.min(1.5, tilt(BI.neck) / (70 * DEG)) +
+    0.5 * Math.min(1, footUp / 0.6) +
+    0.5 * poseExtent(pose).radius +
+    2 * Math.max(0, 0.95 - w.P[0][1])
+  );
 }
 
 // Turn the pose so the chest faces +z, with the center of mass above the origin.
@@ -623,10 +651,12 @@ export function restPose() {
 }
 
 // Picks the strangest of a few valid candidates.
-export function generatePose(rng = Math.random, candidates = 3) {
+export function generatePose(rng = Math.random, candidates = 6) {
+  const r = rng();
+  const support = r < 0.4 ? 'both' : r < 0.7 ? 'L' : 'R';
   let best = null, bestScore = -Infinity;
-  for (let i = 0, found = 0; i < 800 && found < candidates; i++) {
-    const pose = attempt(rng);
+  for (let i = 0, found = 0; i < 1500 && found < candidates; i++) {
+    const pose = attempt(rng, support);
     if (!pose) continue;
     found++;
     const score = weirdness(pose);
