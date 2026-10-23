@@ -1,0 +1,168 @@
+:root {
+  --night: #0b1020;
+  --ink: #eef1f7;
+  --leaf: #a6dc7e;
+  --leaf-edge: #e2f8cf;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--night);
+  color: var(--ink);
+  font-family: "Helvetica Neue", "Segoe UI", system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* start screen: a lonely button */
+
+#start {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse 120% 80% at 50% 75%, #1b2443 0%, #0d1326 55%, #070a14 100%);
+  transition: opacity 1.4s ease;
+}
+
+#start.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#go {
+  font: inherit;
+  font-size: clamp(15px, 2.4vmin, 19px);
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  color: var(--ink);
+  padding: 1em 2em;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(238, 241, 247, 0.32);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.4s, border-color 0.4s, box-shadow 0.4s;
+}
+
+#go:hover,
+#go:focus-visible {
+  outline: none;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(238, 241, 247, 0.7);
+  box-shadow: 0 0 28px rgba(150, 180, 255, 0.22);
+}
+
+#go:active {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+#go:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* the two leaves: right lights up after the first sunset, left after the second */
+
+#leaves {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.6s ease 0.6s;
+}
+
+#leaves.shown {
+  opacity: 1;
+}
+
+.leaf {
+  position: absolute;
+  bottom: calc(12% + env(safe-area-inset-bottom));
+  width: clamp(30px, 5.5vmin, 52px);
+  height: clamp(40px, 7.3vmin, 69px);
+  overflow: visible;
+  transition: filter 1.2s ease;
+}
+
+.leaf.left {
+  left: max(18px, 7vw);
+  rotate: -24deg;
+}
+
+.leaf.right {
+  right: max(18px, 7vw);
+  rotate: 24deg;
+}
+
+.leaf .blade {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(255, 255, 255, 0.55);
+  stroke-width: 2;
+  transition: fill 1.2s ease, stroke 1.2s ease;
+}
+
+.leaf .vein {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.4);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  transition: stroke 1.2s ease;
+}
+
+.leaf.lit {
+  filter: drop-shadow(0 0 10px rgba(170, 240, 130, 0.75));
+  animation: sprout 1.4s ease;
+}
+
+.leaf.lit .blade {
+  fill: var(--leaf);
+  stroke: var(--leaf-edge);
+}
+
+.leaf.lit .vein {
+  stroke: rgba(60, 110, 40, 0.55);
+}
+
+@keyframes sprout {
+  0% { scale: 1; }
+  35% { scale: 1.25; }
+  100% { scale: 1; }
+}
+
+#bye {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 72%;
+  margin: 0;
+  text-align: center;
+  font-size: clamp(30px, 7vmin, 60px);
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  opacity: 0;
+  pointer-events: none;
+  text-shadow: 0 0 24px rgba(160, 190, 255, 0.35);
+  transition: opacity 2.2s ease;
+}
+
+#bye.shown {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .leaf.lit {
+    animation: none;
+  }
+}
