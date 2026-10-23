@@ -529,30 +529,32 @@ export function checkPose(pose) {
 /* ---------- generation ---------- */
 
 // One try at a pose standing on the left foot, the right foot or both feet.
-function attempt(rng, support) {
+// `wild` (0..1) goes from moderately strange to far out.
+function attempt(rng, support, wild) {
   const q = new Float64Array(PARAM_COUNT);
   const both = support === 'both';
   const S = both ? (rng() < 0.5 ? 'L' : 'R') : support; // the foot the body is rooted on
   const F = S === 'L' ? 'R' : 'L';
   const set = (name, s, bias) => sampleJoint(BONES[BI[name]], q, rng, s, bias);
   const knee = (side, lo, hi, bias = 1) => { q[BONES[BI['knee' + side]].param] = lerp(lo, hi, rng() ** bias) * DEG; };
+  const k = (moderate, far) => lerp(moderate, far, wild);
 
-  set('spine1', 1, 0.7);
-  set('spine2', 1, 0.7);
-  set('neck', 1, 0.6);
+  set('spine1', k(0.85, 1), k(1, 0.7));
+  set('spine2', k(0.9, 1), k(1, 0.7));
+  set('neck', k(0.9, 1), k(1, 0.6));
   for (const s of ['L', 'R']) {
-    set('shoulder' + s, 1, 0.6);
-    set('elbow' + s, 1, 0.8);
-    set('wrist' + s, 1, 0.6);
+    set('shoulder' + s, 1, k(0.85, 0.6));
+    set('elbow' + s, 1, k(1, 0.8));
+    set('wrist' + s, k(0.9, 1), k(1, 0.6));
   }
 
   let active, weights, goals, residual;
   if (!both) {
-    set('hip' + S, 0.75, 0.8);
-    knee(S, 0, 55);
-    set('hip' + F, 1, 0.5);
-    knee(F, 0, 140, 0.7);
-    set('ankle' + F, 1, 0.6);
+    set('hip' + S, k(0.55, 0.75), k(1, 0.8));
+    knee(S, 0, k(45, 55));
+    set('hip' + F, 1, k(0.8, 0.5));
+    knee(F, 0, k(130, 140), k(1, 0.7));
+    set('ankle' + F, 1, k(0.9, 0.6));
     // Keep the center of mass over the middle part of the standing foot.
     const tx = lerp(-0.015, 0.015, rng()), tz = lerp(0.0, 0.09, rng());
     active = paramsOf('ankle' + S, 'knee' + S, 'hip' + S, 'spine1');
@@ -563,14 +565,14 @@ function attempt(rng, support) {
     };
   } else {
     for (const s of ['L', 'R']) {
-      set('hip' + s, 0.8, 0.7);
-      knee(s, 10, 90);
+      set('hip' + s, k(0.65, 0.8), k(0.9, 0.7));
+      knee(s, 10, k(75, 90));
     }
     // Second foot flat on the ground, center of mass between the feet.
     const t = lerp(0.3, 0.7, rng());
     // Loose goals for a wide, lunging or squatting stance.
-    const fx = (S === 'L' ? -1 : 1) * lerp(0.25, 0.85, rng()), fz = lerp(-0.55, 0.55, rng());
-    const hipsY = lerp(0.55, 0.92, rng());
+    const fx = (S === 'L' ? -1 : 1) * lerp(k(0.2, 0.25), k(0.7, 0.85), rng()), fz = k(0.45, 0.55) * lerp(-1, 1, rng());
+    const hipsY = lerp(k(0.64, 0.55), k(0.95, 0.92), rng());
     const aF = BI['ankle' + F];
     active = paramsOf('ankle' + S, 'knee' + S, 'hip' + S, 'ankle' + F, 'knee' + F, 'hip' + F, 'spine1');
     weights = [1, 1, 0.6, 0.6, 0.6, 0.3, 1, 1, 0.6, 0.6, 0.6, 0.3, 0.3, 0.3, 0.1];
@@ -650,13 +652,16 @@ export function restPose() {
   return facingFront({ q: new Array(PARAM_COUNT).fill(0), rootR: I3.slice(), rootP: [0, 0.06 + 0.43 + 0.42 + ANKLE_HEIGHT, 0], support: 'both' });
 }
 
-// Picks the strangest of a few valid candidates.
-export function generatePose(rng = Math.random, candidates = 6) {
+// Picks the strangest of a few valid candidates. Most poses are moderately
+// strange; about one in five is far out.
+export function generatePose(rng = Math.random) {
   const r = rng();
   const support = r < 0.4 ? 'both' : r < 0.7 ? 'L' : 'R';
+  const wild = rng() < 0.2 ? 1 : 0;
+  const candidates = wild ? 6 : 3;
   let best = null, bestScore = -Infinity;
   for (let i = 0, found = 0; i < 1500 && found < candidates; i++) {
-    const pose = attempt(rng, support);
+    const pose = attempt(rng, support, wild);
     if (!pose) continue;
     found++;
     const score = weirdness(pose);

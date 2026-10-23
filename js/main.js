@@ -85,6 +85,7 @@ if (renderer) {
 
 let session = null;
 let extent = poseExtent(restPose());
+const CAMERA_HEIGHT = { hips: restPose().rootP[1], head: 1.6 };
 
 function frame() {
   const w = window.innerWidth, h = window.innerHeight;
@@ -98,7 +99,9 @@ function frame() {
   const fitWidth = (extent.radius + 0.15) / Math.tan(hHalf) + extent.radius;
   const dist = Math.max(fitHeight, fitWidth, 3.5);
   // A low camera: the figure stands against the sky, the horizon sits below center.
-  camera.position.set(0, Math.max(0.35, lookY - dist * Math.tan(THREE.MathUtils.degToRad(6))), dist);
+  // ?cam=hips or ?cam=head puts it at the height of the standing figure's hips or eyes.
+  const low = Math.max(0.35, lookY - dist * Math.tan(THREE.MathUtils.degToRad(6)));
+  camera.position.set(0, CAMERA_HEIGHT[params.get('cam')] ?? low, dist);
   camera.userData.lookY = lookY;
   camera.lookAt(0, lookY, 0);
   camera.updateProjectionMatrix();
