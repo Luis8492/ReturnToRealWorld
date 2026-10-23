@@ -1,5 +1,5 @@
 import * as THREE from '../vendor/three/three.module.min.js';
-import { generatePose, restPose, blendPoses, rotatePoseYaw, poseExtent, mulberry32 } from './pose.js';
+import { generatePose, restPose, blendPoses, poseExtent, mulberry32 } from './pose.js';
 import { createFigure } from './figure.js';
 import { createWorld } from './world.js';
 
@@ -16,7 +16,6 @@ const T4 = T3 + DAY; // second sunset
 const T_END = T4 + OUTRO;
 
 const SUN_RATE = Math.PI / DAY;
-const SPIN = (2 * Math.PI) / DAY; // the figure turns once per day
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -36,15 +35,6 @@ function sunAngle(t) {
   if (t < T3) return hermite(Math.PI, 2 * Math.PI, SUN_RATE * NIGHT, SUN_RATE * NIGHT, (t - T2) / NIGHT);
   if (t < T4) return 2 * Math.PI + SUN_RATE * (t - T3);
   return hermite(3 * Math.PI, 3 * Math.PI + 0.7, SUN_RATE * OUTRO, 0, clamp01((t - T4) / OUTRO));
-}
-
-// Turntable angle: speeds up during the intro, constant, then slows to a stop.
-const ramp = (u) => u * u * u - (u * u * u * u) / 2; // integral of smoothstep
-function spinAngle(t) {
-  if (t < T1) return SPIN * INTRO * (ramp(clamp01(t / INTRO)) - 0.5);
-  if (t < T4) return SPIN * (t - T1);
-  const u = clamp01((t - T4) / OUTRO);
-  return SPIN * (T4 - T1) + SPIN * OUTRO * (u - ramp(u));
 }
 
 /* ---------- scene ---------- */
@@ -96,7 +86,7 @@ function frame() {
   const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
   const lookY = extent.height * 0.5;
   const fitHeight = (extent.height * 0.5 + 0.45) / Math.tan(vHalf);
-  const fitWidth = (extent.radius + 0.15) / Math.tan(hHalf) + extent.radius;
+  const fitWidth = (extent.halfWidth + 0.15) / Math.tan(hHalf) + extent.front;
   const dist = Math.max(fitHeight, fitWidth, 3.5);
   camera.position.set(0, EYE_HEIGHT, dist);
   camera.userData.lookY = lookY;
@@ -111,17 +101,16 @@ function frame() {
 }
 
 function poseAt(s, t) {
-  if (t < T1) return blendPoses(s.rest0, s.pose1, smooth(0.5, 2.6, t));
+  if (t < T1) return blendPoses(s.rest, s.pose1, smooth(0.5, 2.6, t));
   if (t < T2) return s.pose1;
   if (t < T3) return blendPoses(s.pose1, s.pose2, smooth(T2 + 0.8, T2 + 3.2, t));
   if (t < T4) return s.pose2;
-  return blendPoses(s.pose2, s.rest1, smooth(T4 + 0.6, T4 + 2.6, t));
+  return blendPoses(s.pose2, s.rest, smooth(T4 + 0.6, T4 + 2.6, t));
 }
 
 function render(t) {
   world.update(sunAngle(t));
   figure.setPose(poseAt(session, t));
-  figure.object.rotation.y = spinAngle(t);
   renderer.render(scene, camera);
 }
 
@@ -157,16 +146,17 @@ const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, {
 function start() {
   if (session || !renderer) return;
   if (!nextPoses) preparePoses();
-  const [a, b] = nextPoses;
+  // The figure stays still, facing the viewer.
+  const [pose1, pose2] = nextPoses;
   nextPoses = null;
-  // Each pose faces the viewer when its day begins.
-  const rest0 = rotatePoseYaw(restPose(), -spinAngle(0));
-  const pose1 = rotatePoseYaw(a, -spinAngle(T1));
-  const pose2 = rotatePoseYaw(b, -spinAngle(T3));
-  const rest1 = rotatePoseYaw(restPose(), -spinAngle(T_END));
+  const rest = restPose();
   const e1 = poseExtent(pose1), e2 = poseExtent(pose2);
-  extent = { radius: Math.max(e1.radius, e2.radius), height: Math.max(e1.height, e2.height) };
-  session = { rest0, pose1, pose2, rest1, t: Math.max(0, Number(params.get('t')) || 0), last: performance.now(), done: false };
+  extent = {
+    halfWidth: Math.max(e1.halfWidth, e2.halfWidth),
+    front: Math.max(e1.front, e2.front),
+    height: Math.max(e1.height, e2.height),
+  };
+  session = { rest, pose1, pose2, t: Math.max(0, Number(params.get('t')) || 0), last: performance.now(), done: false };
   frame();
   render(session.t);
 

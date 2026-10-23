@@ -672,11 +672,6 @@ export function generatePose(rng = Math.random) {
 
 /* ---------- helpers for display ---------- */
 
-export function rotatePoseYaw(pose, angle) {
-  const turn = rotY(angle);
-  return { ...pose, rootR: mul(turn, pose.rootR), rootP: apply(turn, pose.rootP) };
-}
-
 // Interpolates two poses, keeping the lowest point of the body on the ground.
 export function blendPoses(a, b, t) {
   const q = a.q.map((v, i) => lerp(v, b.q[i], t));
@@ -686,17 +681,20 @@ export function blendPoses(a, b, t) {
   return { q, rootR, rootP, support: t < 0.5 ? a.support : b.support };
 }
 
-// Horizontal radius around the y axis and height that the pose occupies.
+// Space the pose occupies: horizontal radius around the y axis, half width
+// (x), how far it reaches toward the viewer (+z) and height.
 export function poseExtent(pose) {
   const w = forwardKinematics(pose.q, pose.rootR, pose.rootP);
-  let radius = 0, height = 0;
+  let radius = 0, halfWidth = 0, front = 0, height = 0;
   for (const c of CAPSULES) {
     for (const p of capsuleWorld(w, c)) {
       radius = Math.max(radius, Math.hypot(p[0], p[2]) + c.r);
+      halfWidth = Math.max(halfWidth, Math.abs(p[0]) + c.r);
+      front = Math.max(front, p[2] + c.r);
       height = Math.max(height, p[1] + c.r);
     }
   }
-  return { radius, height };
+  return { radius, halfWidth, front, height };
 }
 
 export function mulberry32(seed) {
