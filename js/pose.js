@@ -672,6 +672,25 @@ export function generatePose(rng = Math.random) {
 
 /* ---------- helpers for display ---------- */
 
+function turnPose(pose, yaw) {
+  const turn = rotY(yaw);
+  return { ...pose, rootR: mul(turn, pose.rootR), rootP: apply(turn, pose.rootP) };
+}
+
+// Turns the pose by `angle` to the left or to the right, whichever shows the
+// body less foreshortened to a viewer looking from +z.
+export function turnForViewer(pose, angle) {
+  const shown = (p) => {
+    const w = forwardKinematics(p.q, p.rootR, p.rootP);
+    return CAPSULES.reduce((sum, c) => {
+      const [a, b] = capsuleWorld(w, c);
+      return sum + Math.hypot(a[0] - b[0], a[1] - b[1]);
+    }, 0);
+  };
+  const left = turnPose(pose, -angle), right = turnPose(pose, angle);
+  return shown(right) >= shown(left) ? right : left;
+}
+
 // Interpolates two poses, keeping the lowest point of the body on the ground.
 export function blendPoses(a, b, t) {
   const q = a.q.map((v, i) => lerp(v, b.q[i], t));

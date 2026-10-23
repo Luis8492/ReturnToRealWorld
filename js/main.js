@@ -1,5 +1,5 @@
 import * as THREE from '../vendor/three/three.module.min.js';
-import { generatePose, restPose, blendPoses, poseExtent, mulberry32 } from './pose.js';
+import { generatePose, restPose, blendPoses, turnForViewer, poseExtent, mulberry32 } from './pose.js';
 import { createFigure } from './figure.js';
 import { createWorld } from './world.js';
 
@@ -16,6 +16,10 @@ const T4 = T3 + DAY; // second sunset
 const T_END = T4 + OUTRO;
 
 const SUN_RATE = Math.PI / DAY;
+
+// The figure stays still, turned a little from the viewer so that reaching
+// forward or back reads as well as reaching sideways.
+const VIEW_ANGLE = THREE.MathUtils.degToRad(30);
 
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -146,8 +150,7 @@ const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, {
 function start() {
   if (session || !renderer) return;
   if (!nextPoses) preparePoses();
-  // The figure stays still, facing the viewer.
-  const [pose1, pose2] = nextPoses;
+  const [pose1, pose2] = nextPoses.map((p) => turnForViewer(p, VIEW_ANGLE));
   nextPoses = null;
   const rest = restPose();
   const e1 = poseExtent(pose1), e2 = poseExtent(pose2);
