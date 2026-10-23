@@ -5,6 +5,12 @@ import { BONES, ANKLE_HEIGHT, SOLE, jointRotation, matToQuat } from './pose.js';
 
 const WOOD = 0xdcc19c;
 const JOINT = 0xc4a27c;
+// Arms and legs are painted per side so it is clear at a glance which limb is
+// which. Facing the figure like a mirror, its left side (blue, on the right of
+// the screen) is your right side. Blue and orange stay apart for most kinds of
+// color vision.
+const LIMB = { L: 0x4f86c6, R: 0xe0883a };
+const LIMB_JOINT = { L: 0x3d6da8, R: 0xc0702c };
 
 // Tapered limb from the joint (y = 0) down to y = -length.
 function limb(length, r1, r2) {
@@ -58,7 +64,7 @@ export function createFigure() {
     parent.add(m);
     return m;
   };
-  const ball = (parent, r, position) => part(parent, sphere, joint, position, [r, r, r]);
+  const ball = (parent, r, position, material = joint) => part(parent, sphere, material, position, [r, r, r]);
 
   // trunk
   part(bone.pelvis, sphere, wood, [0, -0.015, 0], [0.145, 0.1, 0.1]);
@@ -75,22 +81,24 @@ export function createFigure() {
 
   for (const s of ['L', 'R']) {
     const side = s === 'L' ? 1 : -1;
+    const paint = new THREE.MeshStandardMaterial({ color: LIMB[s], roughness: 0.55 });
+    const knob = new THREE.MeshStandardMaterial({ color: LIMB_JOINT[s], roughness: 0.5 });
     // arm
-    ball(bone['shoulder' + s], 0.05);
-    part(bone['shoulder' + s], limb(0.29, 0.042, 0.034), wood);
-    ball(bone['elbow' + s], 0.036);
-    part(bone['elbow' + s], limb(0.26, 0.034, 0.027), wood);
-    ball(bone['wrist' + s], 0.027);
-    part(bone['wrist' + s], sphere, wood, [0, -0.065, 0], [0.02, 0.055, 0.04]);
-    const thumb = part(bone['wrist' + s], new THREE.CapsuleGeometry(0.012, 0.035, 4, 10), wood, [-0.004 * side, -0.045, 0.04]);
+    ball(bone['shoulder' + s], 0.05, undefined, knob);
+    part(bone['shoulder' + s], limb(0.29, 0.042, 0.034), paint);
+    ball(bone['elbow' + s], 0.036, undefined, knob);
+    part(bone['elbow' + s], limb(0.26, 0.034, 0.027), paint);
+    ball(bone['wrist' + s], 0.027, undefined, knob);
+    part(bone['wrist' + s], sphere, paint, [0, -0.065, 0], [0.02, 0.055, 0.04]);
+    const thumb = part(bone['wrist' + s], new THREE.CapsuleGeometry(0.012, 0.035, 4, 10), paint, [-0.004 * side, -0.045, 0.04]);
     thumb.rotation.x = -0.6;
     // leg
-    ball(bone['hip' + s], 0.065);
-    part(bone['hip' + s], limb(0.43, 0.065, 0.047), wood);
-    ball(bone['knee' + s], 0.047);
-    part(bone['knee' + s], limb(0.42, 0.046, 0.034), wood);
-    ball(bone['ankle' + s], 0.034);
-    part(bone['ankle' + s], footGeometry(), wood);
+    ball(bone['hip' + s], 0.065, undefined, knob);
+    part(bone['hip' + s], limb(0.43, 0.065, 0.047), paint);
+    ball(bone['knee' + s], 0.047, undefined, knob);
+    part(bone['knee' + s], limb(0.42, 0.046, 0.034), paint);
+    ball(bone['ankle' + s], 0.034, undefined, knob);
+    part(bone['ankle' + s], footGeometry(), paint);
   }
 
   function setPose(pose) {
