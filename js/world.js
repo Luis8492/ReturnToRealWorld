@@ -142,7 +142,7 @@ export function createWorld(scene, renderer) {
     const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
     const pitch = Math.atan2(camera.userData.lookY - camera.position.y, camera.position.z);
     arcWidth = hHalf * 0.78;
-    arcHeight = (vHalf + pitch) * 0.82;
+    arcHeight = (vHalf + pitch) * 0.72;
     fill.position.set(camera.position.x + 2, camera.position.y + 4, camera.position.z);
     stars.material.size = 1.5 * renderer.getPixelRatio();
   }
