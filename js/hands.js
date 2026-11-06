@@ -5,15 +5,15 @@
 import * as THREE from '../vendor/three/three.module.min.js';
 import { generatePose, restPose, blendPoses, viewPoints, EYE } from './hand-pose.js';
 import { createHands, DESK_HEIGHT } from './hand-figure.js';
-import { startApp } from './app.js';
 
 const deg = THREE.MathUtils.degToRad;
 
 // Looking down at the hands from the eyes of someone sitting at the desk.
 const LOOK_DOWN = deg(52);
 
-startApp({
-  world: {
+export const handsMode = {
+  button: 'go-hands',
+  worldOptions: {
     shadowCenter: [0, DESK_HEIGHT, -0.2],
     shadowSize: 1.3,
     shadowDepth: 5,
@@ -62,4 +62,4 @@ startApp({
       },
     };
   },
-});
+};

@@ -1,13 +1,15 @@
-// The session shared by both versions: the button, two sunrises and sunsets
+// The session shared by both versions: the buttons, two sunrises and sunsets
 // (one pose each), the leaves, "bye." and keeping the screen on.
 //
-// A stage puts its own figure into the scene and frames the camera:
+// Each version is a mode: the button that starts it, options for its world
+// (see world.js) and a stage, which puts its own figure into the scene and
+// frames the camera:
 //   rest                      pose at the start and the end
 //   makePoses(rng)            two new poses (slow, done ahead of time)
 //   begin([pose1, pose2])     poses about to be shown, returns them as shown
 //   blend(a, b, t)            in-between pose
 //   setPose(pose)
-//   frame(camera, w, h, sky)  places the camera, returns the world point
+//   frame(camera, w, h)       places the camera, returns the world point
 //                             "bye." appears above
 
 import * as THREE from '../vendor/three/three.module.min.js';
@@ -47,14 +49,14 @@ function sunAngle(t) {
   return hermite(3 * Math.PI, 3 * Math.PI + 0.7, SUN_RATE * OUTRO, 0, clamp01((t - T4) / OUTRO));
 }
 
-export function startApp({ world: worldOptions = {}, createStage }) {
+export function startApp(modes) {
   const canvas = document.getElementById('scene');
   const startScreen = document.getElementById('start');
-  const button = document.getElementById('go');
   const leaves = document.getElementById('leaves');
   const leafRight = leaves.querySelector('.right');
   const leafLeft = leaves.querySelector('.left');
   const bye = document.getElementById('bye');
+  for (const mode of modes) mode.button = document.getElementById(mode.button);
 
   const params = new URLSearchParams(location.search);
 
@@ -63,37 +65,43 @@ export function startApp({ world: worldOptions = {}, createStage }) {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   } catch (err) {
     console.error(err);
-    button.disabled = true;
-    button.textContent = 'WebGL is not available';
+    for (const mode of modes) mode.button.disabled = true;
+    modes[0].button.textContent = 'WebGL is not available';
     return;
   }
 
-  const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 5000);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
-  const world = createWorld(scene, renderer, worldOptions);
-  const stage = createStage(scene, renderer);
+  // Each mode has a scene of its own.
+  for (const mode of modes) {
+    mode.scene = new THREE.Scene();
+    mode.world = createWorld(mode.scene, renderer, mode.worldOptions);
+    mode.stage = mode.createStage(mode.scene, renderer);
+    mode.nextPoses = null;
+  }
 
   /* ---------- session ---------- */
 
   let session = null;
 
   function frame() {
+    const { stage, world } = session.mode;
     const w = window.innerWidth, h = window.innerHeight;
     renderer.setSize(w, h, false);
     const anchor = stage.frame(camera, w, h);
     camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     world.setFraming(camera);
-    // "bye." appears in the sky just above the anchor point.
+    // "bye." appears just above the anchor point.
     const p = anchor.clone().project(camera);
     const above = h - ((1 - p.y) / 2) * h + 12;
     bye.style.bottom = `${Math.min(above, h - bye.offsetHeight - 16)}px`;
   }
 
   function poseAt(s, t) {
+    const { stage } = s.mode;
     if (t < T1) return stage.blend(stage.rest, s.pose1, smooth(0.5, 2.6, t));
     if (t < T2) return s.pose1;
     if (t < T3) return stage.blend(s.pose1, s.pose2, smooth(T2 + 0.8, T2 + 3.2, t));
@@ -102,6 +110,7 @@ export function startApp({ world: worldOptions = {}, createStage }) {
   }
 
   function render(t) {
+    const { stage, world, scene } = session.mode;
     world.update(sunAngle(t));
     stage.setPose(poseAt(session, t));
     renderer.render(scene, camera);
@@ -121,26 +130,25 @@ export function startApp({ world: worldOptions = {}, createStage }) {
     if (t >= T_END) {
       s.done = true;
       releaseWakeLock();
-      whenIdle(preparePoses);
+      whenIdle(() => preparePoses(s.mode));
       return;
     }
     requestAnimationFrame(tick);
   }
 
-  // Poses are made ahead of time so the button responds at once.
-  let nextPoses = null;
-  function preparePoses() {
+  // Poses are made ahead of time so the buttons respond at once.
+  function preparePoses(mode) {
     const seed = params.has('seed') ? Number(params.get('seed')) : (Math.random() * 2 ** 32) >>> 0;
-    nextPoses = stage.makePoses(mulberry32(seed));
+    mode.nextPoses = mode.stage.makePoses(mulberry32(seed));
   }
   const whenIdle = (fn) => (window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 1000 }) : setTimeout(fn, 200));
 
-  function start() {
+  function start(mode) {
     if (session) return;
-    if (!nextPoses) preparePoses();
-    const [pose1, pose2] = stage.begin(nextPoses);
-    nextPoses = null;
-    session = { pose1, pose2, t: Math.max(0, Number(params.get('t')) || 0), last: performance.now(), done: false };
+    if (!mode.nextPoses) preparePoses(mode);
+    const [pose1, pose2] = mode.stage.begin(mode.nextPoses);
+    mode.nextPoses = null;
+    session = { mode, pose1, pose2, t: Math.max(0, Number(params.get('t')) || 0), last: performance.now(), done: false };
     frame();
     render(session.t);
 
@@ -151,18 +159,25 @@ export function startApp({ world: worldOptions = {}, createStage }) {
   }
 
   function reset() {
+    const { mode } = session;
     session = null;
     leafLeft.classList.remove('lit');
     leafRight.classList.remove('lit');
     bye.classList.remove('shown');
     leaves.classList.remove('shown');
     startScreen.classList.remove('hidden');
-    button.focus({ preventScroll: true });
+    mode.button.focus({ preventScroll: true });
   }
 
-  whenIdle(preparePoses);
-  button.addEventListener('click', start);
-  // After "bye.", a tap anywhere brings the button back.
+  for (const mode of modes) {
+    whenIdle(() => {
+      preparePoses(mode);
+      // compile the shaders too, so the first frame after a click does not stall
+      if (!session) renderer.compile(mode.scene, camera);
+    });
+    mode.button.addEventListener('click', () => start(mode));
+  }
+  // After "bye.", a tap anywhere brings the buttons back.
   canvas.addEventListener('click', () => {
     if (session && session.done) reset();
   });
