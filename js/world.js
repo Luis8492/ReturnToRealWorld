@@ -1,6 +1,14 @@
 // Sky, sun, stars, ground and lights. update(theta) moves the sun:
 // theta = 0 is sunrise on the left, PI/2 is noon, PI is sunset on the right,
 // and PI..2PI is the night below the horizon.
+//
+// Options:
+//   shadowCenter, shadowSize  the area (meters) the sun's shadows cover
+//   shadowDepth               depth (meters) of the shadow box around shadowCenter
+//   shadowNormalBias          how far shadow lookups are pushed off surfaces
+//   sunPath                   [width, height] of the sun's arc (radians of
+//                             azimuth and elevation); by default it is fitted
+//                             to the camera so the whole arc is on screen
 
 import * as THREE from '../vendor/three/three.module.min.js';
 
@@ -90,7 +98,7 @@ function createStars(count = 900) {
   return stars;
 }
 
-export function createWorld(scene, renderer) {
+export function createWorld(scene, renderer, { shadowCenter = [0, 0.9, 0], shadowSize = 2.2, shadowDepth = 0, shadowNormalBias = 0.02, sunPath = null } = {}) {
   const uniforms = {
     zenith: { value: new THREE.Color() },
     horizon: { value: new THREE.Color() },
@@ -122,10 +130,13 @@ export function createWorld(scene, renderer) {
   const sun = new THREE.DirectionalLight(0xffffff, 0);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
-  Object.assign(sun.shadow.camera, { left: -2.2, right: 2.2, top: 2.2, bottom: -2.2, near: 1, far: 80 });
+  const r = shadowSize;
+  const SUN_DISTANCE = 30;
+  const [near, far] = shadowDepth ? [SUN_DISTANCE - shadowDepth / 2, SUN_DISTANCE + shadowDepth / 2] : [1, 80];
+  Object.assign(sun.shadow.camera, { left: -r, right: r, top: r, bottom: -r, near, far });
   sun.shadow.bias = -0.0004;
-  sun.shadow.normalBias = 0.02;
-  sun.target.position.set(0, 0.9, 0);
+  sun.shadow.normalBias = shadowNormalBias;
+  sun.target.position.fromArray(shadowCenter);
   scene.add(sun, sun.target);
 
   const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 1);
@@ -136,13 +147,15 @@ export function createWorld(scene, renderer) {
   scene.add(fill);
 
   // Sun path, set from the camera so the whole arc stays on screen.
-  let arcWidth = 0.4, arcHeight = 0.35;
+  let [arcWidth, arcHeight] = sunPath || [0.4, 0.35];
   function setFraming(camera) {
     const vHalf = THREE.MathUtils.degToRad(camera.fov / 2);
     const hHalf = Math.atan(Math.tan(vHalf) * camera.aspect);
-    const pitch = Math.atan2(camera.userData.lookY - camera.position.y, camera.position.z);
-    arcWidth = hHalf * 0.78;
-    arcHeight = (vHalf + pitch) * 0.72;
+    const pitch = Math.asin(camera.getWorldDirection(new THREE.Vector3()).y);
+    if (!sunPath) {
+      arcWidth = hHalf * 0.78;
+      arcHeight = (vHalf + pitch) * 0.72;
+    }
     fill.position.set(camera.position.x + 2, camera.position.y + 4, camera.position.z);
     stars.material.size = 1.5 * renderer.getPixelRatio();
   }
@@ -173,7 +186,7 @@ export function createWorld(scene, renderer) {
     scene.fog.color.copy(uniforms.horizon.value);
 
     const day = smoothstep(-0.25, 0.45, s);
-    sun.position.copy(sun.target.position).addScaledVector(dir, 30);
+    sun.position.copy(sun.target.position).addScaledVector(dir, SUN_DISTANCE);
     sun.color.copy(warm).lerp(white, smoothstep(0, 0.45, s));
     sun.intensity = 2.6 * smoothstep(-0.02, 0.2, s);
     hemi.color.copy(nightBlue).lerp(dayBlue, day);
